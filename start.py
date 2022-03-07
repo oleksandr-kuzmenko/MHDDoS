@@ -402,8 +402,21 @@ class HttpFlood(Thread):
     @property
     def _url(self):
         url = self._raw_url.human_repr()
-        url = url.replace('{rand_int}', str(randint(0, 500)))
-        url = url.replace('{rand_str}', ''.join(randchoice(ascii_lowercase) for _ in range(randint(5, 15))))
+
+        if '{rand_int}' in url:
+            parts = []
+            for p in url.split('{rand_int}'):
+                parts.append(p)
+                parts.append(str(randint(0, 1000)))
+            url = ''.join(parts[:-1])
+
+        if '{rand_str}' in url:
+            parts = []
+            for p in url.split('{rand_str}'):
+                parts.append(p)
+                parts.append(''.join(randchoice(ascii_lowercase) for _ in range(randint(5, 20))))
+            url = ''.join(parts[:-1])
+
         return URL(url)
 
     def run(self) -> None:
